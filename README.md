@@ -22,15 +22,22 @@
 2. Vercel сам добавит `BLOB_READ_WRITE_TOKEN` в Environment Variables  
 3. **Redeploy** проект (Deployments → … → Redeploy)
 
-### 3. Загрузить уже скачанные фото в Blob (если есть папка `data/images`)
+### 3. Старые фото (166 шт. в `data/images/`)
 
-Локально:
+Они **не попадают на сайт сами** — Vercel не читает локальную папку, только **Blob**.
+
+После подключения Blob сделай **Redeploy** — при сборке выполнится `npm run build` и фото загрузятся автоматически.
+
+Или вручную:
 
 ```bash
 npm install
-# Скопируй BLOB_READ_WRITE_TOKEN из Vercel в .env.local
+# BLOB_READ_WRITE_TOKEN в .env.local из Vercel → Storage → Blob
 npm run seed
 ```
+
+Или на сайте: войти → «Редактирование» (`tinytiny`) → в консоли браузера:
+`fetch('/api/seed',{method:'POST',headers:{'X-Admin-Password':'tinytiny'}}).then(r=>r.json()).then(console.log)`
 
 ### 4. Переменные окружения (Settings → Environment Variables)
 

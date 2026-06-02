@@ -1,11 +1,13 @@
 import {
-  addPhotoEntry,
+  addPhotoEntries,
   existingUrlKeys,
   getManifest,
   uploadImage,
 } from '../../lib/blob-store.js';
 import { nextImportName, parseHar } from '../../lib/ok-import.js';
 import { requireAdmin } from '../../lib/auth.js';
+
+export const config = { maxDuration: 300 };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -28,9 +30,10 @@ export default async function handler(req, res) {
   try {
     const items = parseHar(buf);
     const known = await existingUrlKeys();
-    let added = 0;
     let skipped = 0;
+    let errors = 0;
     const manifest = await getManifest();
+    const newEntries = [];
 
     for (const { url, mime, data } of items) {
       const key = url.split('&')[0];
@@ -38,24 +41,34 @@ export default async function handler(req, res) {
         skipped++;
         continue;
       }
-      const ext =
-        { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mime] || '.webp';
-      const id = nextImportName(manifest, ext);
-      const blob = await uploadImage(id, Buffer.from(data), mime);
-      await addPhotoEntry({
-        id,
-        name: id,
-        mime,
-        source: 'har',
-        originalUrl: url,
-        blobUrl: blob.url,
-      });
-      manifest.push({ id });
-      known.add(key);
-      added++;
+      try {
+        const ext =
+          { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mime] || '.webp';
+        const id = nextImportName([...manifest, ...newEntries], ext);
+        const blob = await uploadImage(id, Buffer.from(data), mime);
+        newEntries.push({
+          id,
+          name: id,
+          mime,
+          source: 'har',
+          originalUrl: url,
+          blobUrl: blob.url,
+        });
+        known.add(key);
+      } catch {
+        errors++;
+      }
     }
 
-    return res.status(200).json({ ok: true, added, skipped, entries: items.length });
+    const added = await addPhotoEntries(newEntries);
+
+    return res.status(200).json({
+      ok: true,
+      added,
+      skipped,
+      errors,
+      entries: items.length,
+    });
   } catch (e) {
     return res.status(400).json({ error: e.message || 'HAR parse failed' });
   }

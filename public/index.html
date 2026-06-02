@@ -279,7 +279,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     img.alt = item.name;
     img.decoding = 'async';
     img.loading = 'lazy';
-    img.src = '/media/' + encodeURIComponent(item.id);
+    img.src = item.url || ('/media/' + encodeURIComponent(item.id));
     img.onload = () => { img.classList.add('loaded'); card.classList.add('loaded'); loaded++; updateStatus(); };
     card.insertBefore(img, card.querySelector('.ph'));
     img.onclick = () => { currentId = item.id; lbImg.src = img.src; lbCap.textContent = item.name; lb.classList.add('open'); };
@@ -311,11 +311,13 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
         headers: adminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ url })
       });
-      importLog.textContent = `Готово: найдено ${r.found}, добавлено ${r.added}, пропущено ${r.skipped}` +
-        (r.has_cookies ? '' : ' (без cookies — мало фото)');
+      let msg = `Найдено ${r.found}, добавлено ${r.added}, пропущено ${r.skipped}, ошибок ${r.errors || 0}`;
+      if (r.hint) msg += '. ' + r.hint;
+      if (r.added === 0) showToast(r.hint || 'Ни одно фото не сохранилось');
+      else showToast(`Добавлено ${r.added} фото`);
+      importLog.textContent = msg;
       await syncAll();
       renderGallery();
-      showToast('Импорт завершён');
     } catch (e) {
       importLog.textContent = '';
       showToast(e.message);

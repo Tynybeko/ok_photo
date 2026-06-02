@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "seed": "node scripts/seed-blob.mjs"
+    "seed": "node scripts/seed-blob.mjs",
+    "build": "node scripts/seed-blob.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^0.27.3"
