@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OK.ru — фото</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0f0f0f;color:#e8e8e8}
+#gate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:#0f0f0f}
+#gate.hidden{display:none}
+.gate-box{width:min(320px,92vw);padding:28px 24px;background:#1a1a1a;border-radius:12px;border:1px solid #333;text-align:center}
+.gate-box h2{margin:0 0 16px;font-size:1.15rem;font-weight:600}
+.gate-box input{width:100%;padding:10px 12px;border:1px solid #444;border-radius:8px;background:#111;color:#fff;font-size:1rem;margin-bottom:12px}
+.gate-box input:focus{outline:none;border-color:#5b8def}
+.gate-box button{width:100%;padding:10px;border:none;border-radius:8px;background:#5b8def;color:#fff;font-size:1rem;cursor:pointer;font-weight:600}
+.gate-box button:hover{background:#4a7de0}
+.gate-err{color:#f66;font-size:.85rem;min-height:1.2em;margin-top:8px}
+#app{display:none}
+#app.visible{display:block}
+header{position:sticky;top:0;z-index:10;background:rgba(15,15,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid #222;padding:12px 16px}
+.header-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:1.1rem;font-weight:600}
+#status{font-size:.85rem;color:#888}
+.import-panel{margin-top:12px;padding:12px;background:#1a1a1a;border-radius:8px;border:1px solid #2a2a2a}
+.import-panel label{display:block;font-size:.8rem;color:#aaa;margin-bottom:6px}
+.import-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.import-row input[type=url]{flex:1;min-width:200px;padding:8px 10px;border:1px solid #444;border-radius:6px;background:#111;color:#fff;font-size:.9rem}
+.import-row button,.import-row label.btn{padding:8px 14px;border:none;border-radius:6px;background:#3d6b35;color:#fff;font-size:.9rem;cursor:pointer;white-space:nowrap}
+.import-row label.btn{display:inline-block}
+.import-row button:disabled,.import-row label.btn.disabled{opacity:.5;pointer-events:none}
+.import-row button.secondary{background:#444}
+.import-hint{font-size:.75rem;color:#666;line-height:1.4}
+#importLog{font-size:.8rem;color:#8ab4f8;min-height:1.2em;margin-top:6px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;padding:12px}
+.card{position:relative;background:#1a1a1a;border-radius:8px;overflow:hidden;aspect-ratio:1}
+.card .ph{position:absolute;inset:0;background:linear-gradient(110deg,#1a1a1a 8%,#252525 18%,#1a1a1a 33%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position-x:-200%}}
+.card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s;cursor:pointer}
+.card img.loaded{opacity:1}
+.card.loaded .ph{display:none}
+.card .del{position:absolute;top:6px;right:6px;z-index:5;width:28px;height:28px;border:none;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:16px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
+.card:hover .del,.card .del:focus{opacity:1}
+.card .del:hover{background:#c0392b}
+#lightbox{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.95);align-items:center;justify-content:center;padding:16px;flex-direction:column}
+#lightbox.open{display:flex}
+#lightbox img{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;border-radius:4px}
+#lightbox .toolbar{position:absolute;top:12px;right:12px;display:flex;gap:8px}
+#lightbox .toolbar button{padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:.9rem}
+#lightbox .btn-del{background:#c0392b;color:#fff}
+#lightbox .btn-close{background:#333;color:#fff}
+#lightbox .cap{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:.8rem;color:#aaa;max-width:90%;text-align:center;word-break:break-all}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;padding:10px 18px;border-radius:8px;font-size:.9rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:300}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="gate-box">
+    <h2>Введите пароль</h2>
+    <input type="password" id="pwd" placeholder="Пароль" autocomplete="current-password">
+    <button type="button" id="pwdBtn">Войти</button>
+    <div class="gate-err" id="pwdErr"></div>
+  </div>
+</div>
+<div id="app">
+  <header>
+    <div class="header-row">
+      <h1>Фото OK.ru</h1>
+      <span id="status">…</span>
+    </div>
+    <div class="import-panel">
+      <label for="profileUrl">Ссылка на профиль Одноклассников</label>
+      <div class="import-row">
+        <input type="url" id="profileUrl" placeholder="https://ok.ru/profile/123456789/photos">
+        <button type="button" id="btnImport">Скачать фото</button>
+        <label class="btn" id="harLabel">HAR файл<input type="file" id="harFile" accept=".har" hidden></label>
+      </div>
+      <div id="importLog"></div>
+      <p class="import-hint">Для полного альбома положите <code>cookies.txt</code> (экспорт cookies из браузера) в папку с сервером. Без cookies — только превью. Импорт и удаления общие для всех, кто открыл галерею через <code>python3 serve.py</code>.</p>
+    </div>
+  </header>
+  <main id="grid"></main>
+</div>
+<div id="lightbox" role="dialog" aria-modal="true">
+  <div class="toolbar">
+    <button class="btn-del" type="button" id="lbDel">Удалить</button>
+    <button class="btn-close" type="button" id="lbClose">&times; Закрыть</button>
+  </div>
+  <img alt="">
+  <div class="cap"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+(function(){
+  const PASS = "12341234";
+  const LS_AUTH = 'ok-gallery-auth';
+  const gate = document.getElementById('gate');
+  const app = document.getElementById('app');
+  const pwd = document.getElementById('pwd');
+  const pwdBtn = document.getElementById('pwdBtn');
+  const pwdErr = document.getElementById('pwdErr');
+  const grid = document.getElementById('grid');
+  const status = document.getElementById('status');
+  const lb = document.getElementById('lightbox');
+  const lbImg = lb.querySelector('img');
+  const lbCap = lb.querySelector('.cap');
+  const toast = document.getElementById('toast');
+  const profileUrl = document.getElementById('profileUrl');
+  const btnImport = document.getElementById('btnImport');
+  const harFile = document.getElementById('harFile');
+  const importLog = document.getElementById('importLog');
+
+  let allPhotos = [];
+  let deletedSet = new Set();
+  let loaded = 0;
+  let currentId = null;
+  let toastT, io, syncTimer;
+  const useApi = location.protocol.startsWith('http');
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  function updateStatus() {
+    const n = allPhotos.filter(p => !deletedSet.has(p.id)).length;
+    status.textContent = n + ' фото' + (useApi ? ' · общая база' : ' · нужен serve.py');
+  }
+
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  }
+
+  async function loadPhotos() {
+    if (!useApi) {
+      showToast('Запустите: python3 serve.py');
+      return;
+    }
+    allPhotos = await api('/api/photos', { cache: 'no-store' });
+  }
+
+  async function loadDeleted() {
+    if (!useApi) {
+      try {
+        deletedSet = new Set(JSON.parse(localStorage.getItem('ok-gallery-deleted') || '[]'));
+      } catch { deletedSet = new Set(); }
+      return;
+    }
+    deletedSet = new Set(await api('/api/deleted', { cache: 'no-store' }));
+  }
+
+  async function syncAll() {
+    try {
+      const sig = JSON.stringify([...deletedSet]) + '|' + allPhotos.map(p => p.id).join(',');
+      await loadDeleted();
+      await loadPhotos();
+      const sig2 = JSON.stringify([...deletedSet]) + '|' + allPhotos.map(p => p.id).join(',');
+      if (sig !== sig2) renderGallery();
+      else updateStatus();
+    } catch (_) {}
+  }
+
+  function unlock() {
+    localStorage.setItem(LS_AUTH, '1');
+    gate.classList.add('hidden');
+    app.classList.add('visible');
+    startGallery();
+  }
+
+  function tryLogin() {
+    if (pwd.value === PASS) { pwdErr.textContent = ''; unlock(); }
+    else { pwdErr.textContent = 'Неверный пароль'; pwd.value = ''; pwd.focus(); }
+  }
+
+  if (localStorage.getItem(LS_AUTH) === '1') unlock();
+  else {
+    pwdBtn.onclick = tryLogin;
+    pwd.onkeydown = e => { if (e.key === 'Enter') tryLogin(); };
+    pwd.focus();
+  }
+
+  async function startGallery() {
+    await syncAll();
+    renderGallery();
+    if (useApi) syncTimer = setInterval(syncAll, 2000);
+  }
+
+  function renderGallery() {
+    const items = allPhotos.filter(p => !deletedSet.has(p.id));
+    loaded = 0;
+    grid.innerHTML = '';
+    updateStatus();
+    if (!items.length) {
+      grid.innerHTML = '<p style="grid-column:1/-1;text-align:center;color:#888;padding:40px">Нет фото</p>';
+      return;
+    }
+    items.forEach((item, i) => {
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.dataset.i = i;
+      card.dataset.id = item.id;
+      card.innerHTML = '<div class="ph"></div><button class="del" type="button" title="Удалить">&times;</button>';
+      card.querySelector('.del').onclick = e => { e.stopPropagation(); deletePhoto(item.id); };
+      grid.appendChild(card);
+    });
+    observeCards(items);
+  }
+
+  async function deletePhoto(id) {
+    if (!confirm('Удалить это фото у всех?')) return;
+    try {
+      if (useApi) {
+        await api('/api/deleted', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: id })
+        });
+        await syncAll();
+      } else {
+        deletedSet.add(id);
+        localStorage.setItem('ok-gallery-deleted', JSON.stringify([...deletedSet]));
+        renderGallery();
+      }
+      if (currentId === id) lb.classList.remove('open');
+      showToast('Удалено');
+    } catch (e) {
+      showToast('Ошибка: ' + e.message);
+    }
+  }
+
+  function mountImage(card, item) {
+    if (card.dataset.mounted) return;
+    card.dataset.mounted = '1';
+    const img = document.createElement('img');
+    img.alt = item.name;
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.src = '/media/' + encodeURIComponent(item.id);
+    img.onload = () => { img.classList.add('loaded'); card.classList.add('loaded'); loaded++; updateStatus(); };
+    card.insertBefore(img, card.querySelector('.ph'));
+    img.onclick = () => { currentId = item.id; lbImg.src = img.src; lbCap.textContent = item.name; lb.classList.add('open'); };
+  }
+
+  function observeCards(items) {
+    if (io) io.disconnect();
+    io = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          const i = +e.target.dataset.i;
+          mountImage(e.target, items[i]);
+          io.unobserve(e.target);
+        }
+      });
+    }, { rootMargin: '200px' });
+    grid.querySelectorAll('.card').forEach(c => io.observe(c));
+  }
+
+  btnImport.onclick = async () => {
+    const url = profileUrl.value.trim();
+    if (!url) { showToast('Вставьте ссылку на профиль'); return; }
+    btnImport.disabled = true;
+    importLog.textContent = 'Импорт… это может занять несколько минут';
+    try {
+      const r = await api('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      importLog.textContent = `Готово: найдено ${r.found}, добавлено ${r.added}, пропущено ${r.skipped}` +
+        (r.has_cookies ? '' : ' (без cookies — мало фото)');
+      await syncAll();
+      renderGallery();
+      showToast('Импорт завершён');
+    } catch (e) {
+      importLog.textContent = '';
+      showToast(e.message);
+    } finally {
+      btnImport.disabled = false;
+    }
+  };
+
+  harFile.onchange = async () => {
+    const file = harFile.files[0];
+    if (!file) return;
+    importLog.textContent = 'Разбор HAR…';
+    try {
+      const r = await api('/api/import/har', { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream' } });
+      importLog.textContent = `HAR: добавлено ${r.added}, пропущено ${r.skipped}`;
+      await syncAll();
+      renderGallery();
+      showToast('HAR импортирован');
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      harFile.value = '';
+    }
+  };
+
+  document.getElementById('lbClose').onclick = () => lb.classList.remove('open');
+  document.getElementById('lbDel').onclick = () => { if (currentId) deletePhoto(currentId); };
+  lb.onclick = e => { if (e.target === lb) lb.classList.remove('open'); };
+  document.onkeydown = e => { if (e.key === 'Escape') lb.classList.remove('open'); };
+})();
+</script>
+</body>
+</html>
