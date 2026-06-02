@@ -118,7 +118,7 @@ def add_photo(
     if original_url:
         entry["url"] = original_url
     items = load_manifest()
-    items.append(entry)
+    items.insert(0, entry)
     save_manifest(items)
     return entry
 

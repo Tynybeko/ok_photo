@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from gallery_store import (
     IMAGES_DIR,
+    add_photo,
     migrate_legacy_embedded,
     photo_path,
     list_for_api,
@@ -176,6 +177,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
             finally:
                 _import_lock.release()
+            return
+
+        if path == "/api/upload":
+            if self.headers.get("X-Admin-Password") != ADMIN_PASSWORD:
+                self._send_json(403, {"error": "Нужен пароль редактирования"})
+                return
+            raw = self._read_body()
+            if not raw or len(raw) < 100:
+                self._send_json(400, {"error": "Файл не передан"})
+                return
+            mime = self.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            if not mime.startswith("image/"):
+                self._send_json(400, {"error": "Нужен файл изображения"})
+                return
+            try:
+                entry = add_photo(raw, mime, source="upload")
+                self._send_json(200, {"ok": True, "added": 1, "id": entry["id"]})
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
             return
 
         if path == "/api/import/har":
