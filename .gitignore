@@ -3,4 +3,5 @@ node_modules/
 .env
 .env.local
 cookies.txt
+OK_COOKIES.txt
 .DS_Store
