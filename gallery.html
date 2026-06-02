@@ -178,7 +178,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
       showToast('Откройте сайт через Vercel или python3 serve.py');
       return;
     }
-    allPhotos = await api('/api/photos', { cache: 'no-store' });
+    allPhotos = await api('/api/photos?_=' + Date.now(), { cache: 'no-store' });
   }
 
   async function loadDeleted() {
@@ -188,17 +188,19 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
       } catch { deletedSet = new Set(); }
       return;
     }
-    deletedSet = new Set(await api('/api/deleted', { cache: 'no-store' }));
+    const remote = await api('/api/deleted?_=' + Date.now(), { cache: 'no-store' });
+    // Объединяем: не теряем локальные удаления, пока сервер не подтвердил
+    deletedSet = new Set([...deletedSet, ...(Array.isArray(remote) ? remote : [])]);
   }
 
   async function syncAll() {
     try {
-      const sig = JSON.stringify([...deletedSet]) + '|' + allPhotos.map(p => p.id).join(',');
+      const prevDeleted = new Set(deletedSet);
       await loadDeleted();
       await loadPhotos();
-      const sig2 = JSON.stringify([...deletedSet]) + '|' + allPhotos.map(p => p.id).join(',');
-      if (sig !== sig2) renderGallery();
-      else updateStatus();
+      // Не откатываем удаления, если сервер ещё отдал устаревший список
+      for (const id of prevDeleted) deletedSet.add(id);
+      renderGallery();
     } catch (_) {}
   }
 
@@ -256,19 +258,24 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     if (!confirm('Удалить это фото у всех?')) return;
     try {
       if (useApi) {
-        await api('/api/deleted', {
+        const r = await api('/api/deleted', {
           method: 'POST',
           headers: adminHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ name: id })
         });
-        await syncAll();
+        if (Array.isArray(r.deleted)) deletedSet = new Set([...deletedSet, ...r.deleted]);
+        else deletedSet.add(id);
+        allPhotos = allPhotos.filter(p => p.id !== id);
+        if (currentId === id) lb.classList.remove('open');
+        renderGallery();
+        showToast('Удалено');
       } else {
         deletedSet.add(id);
         localStorage.setItem('ok-gallery-deleted', JSON.stringify([...deletedSet]));
+        if (currentId === id) lb.classList.remove('open');
         renderGallery();
+        showToast('Удалено');
       }
-      if (currentId === id) lb.classList.remove('open');
-      showToast('Удалено');
     } catch (e) {
       showToast('Ошибка: ' + e.message);
     }
