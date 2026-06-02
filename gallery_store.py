@@ -83,7 +83,7 @@ def next_import_name(ext: str) -> str:
     items = load_manifest()
     nums = []
     for it in items:
-        m = re.match(r"^imp_(\d+)_", it.get("id", ""))
+        m = re.match(r"^imp_(\d+)", it.get("id", ""))
         if m:
             nums.append(int(m.group(1)))
     n = max(nums, default=0) + 1

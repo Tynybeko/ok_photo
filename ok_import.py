@@ -243,7 +243,12 @@ def import_from_har(har_bytes: bytes) -> dict:
     entries = har.get("log", {}).get("entries", [])
     added = 0
     skipped = 0
+    errors = 0
+    from_body = 0
+    downloaded = 0
     known = existing_url_keys()
+    urls_only: set[str] = set()
+    seen_body: set[str] = set()
 
     for entry in entries:
         url = entry.get("request", {}).get("url", "")
@@ -251,28 +256,63 @@ def import_from_har(har_bytes: bytes) -> dict:
             continue
         if any(p in url for p in SKIP_URL_PARTS):
             continue
+        url = _best_quality_url(url)
         key = url.split("&")[0]
-        if key in known:
-            skipped += 1
-            continue
 
         content = entry.get("response", {}).get("content", {})
         text = content.get("text")
-        if not text:
-            continue
         mime = (content.get("mimeType") or "image/webp").split(";")[0]
-        if not mime.startswith("image/"):
-            continue
 
-        raw = (
-            base64.b64decode(text)
-            if content.get("encoding") == "base64"
-            else text.encode("latin1")
-        )
-        if len(raw) < 500:
-            continue
-        add_photo(raw, mime, source="har", original_url=url)
-        known.add(key)
-        added += 1
+        if text and mime.startswith("image/"):
+            raw = (
+                base64.b64decode(text)
+                if content.get("encoding") == "base64"
+                else text.encode("latin1")
+            )
+            if len(raw) >= 500 and key not in seen_body:
+                seen_body.add(key)
+                if key in known:
+                    skipped += 1
+                    continue
+                add_photo(raw, mime, source="har", original_url=url)
+                known.add(key)
+                added += 1
+                from_body += 1
+                continue
 
-    return {"added": added, "skipped": skipped, "entries": len(entries)}
+        urls_only.add(key)
+
+    urls_only -= seen_body
+
+    for key in urls_only:
+        if key in known:
+            skipped += 1
+            continue
+        url = _best_quality_url(key)
+        try:
+            data, mime = download_image(url)
+            if len(data) < 500:
+                errors += 1
+                continue
+            add_photo(data, mime, source="har", original_url=url)
+            known.add(key)
+            added += 1
+            downloaded += 1
+        except Exception:
+            errors += 1
+
+    hint = None
+    if added == 0 and from_body == 0 and not urls_only:
+        hint = "В HAR нет фото okcdn.ru"
+    elif added == 0 and from_body == 0 and urls_only:
+        hint = "HAR без тел — скачивание не удалось. Экспортируйте с Save content или cookies.txt"
+
+    return {
+        "added": added,
+        "skipped": skipped,
+        "errors": errors,
+        "from_body": from_body,
+        "downloaded": downloaded,
+        "entries": len(entries),
+        "hint": hint,
+    }

@@ -337,10 +337,14 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
         body: file,
         headers: adminHeaders({ 'Content-Type': 'application/octet-stream' })
       });
-      importLog.textContent = `HAR: добавлено ${r.added}, пропущено ${r.skipped}`;
+      let msg = `HAR: добавлено ${r.added}, пропущено ${r.skipped}, ошибок ${r.errors || 0}`;
+      if (r.fromBody != null) msg += ` (из файла ${r.fromBody}, скачано ${r.downloaded || 0})`;
+      if (r.hint) msg += '. ' + r.hint;
+      importLog.textContent = msg;
       await syncAll();
       renderGallery();
-      showToast('HAR импортирован');
+      if (r.added === 0) showToast(r.hint || 'Ни одно фото не добавилось');
+      else showToast(`Добавлено ${r.added} фото`);
     } catch (e) {
       showToast(e.message);
     } finally {
