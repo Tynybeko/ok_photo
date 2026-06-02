@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/gallery.html", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/import.js": { "maxDuration": 60 },
+    "api/import/har.js": { "maxDuration": 60 }
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+.vercel/
+.env
+.env.local
+cookies.txt
+.DS_Store

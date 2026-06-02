@@ -25,8 +25,14 @@ DELETED_FILE = ROOT / "deleted.json"
 GALLERY_FILE = ROOT / "gallery.html"
 HOST = "0.0.0.0"
 PORT = 8765
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "tinytiny")
 
 _import_lock = threading.Lock()
+
+
+def _is_admin(handler: BaseHTTPRequestHandler, body: dict | None) -> bool:
+    got = handler.headers.get("X-Admin-Password") or (body or {}).get("adminPassword")
+    return got == ADMIN_PASSWORD
 
 
 def load_deleted() -> set[str]:
@@ -83,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Password")
         self.end_headers()
 
     def do_GET(self) -> None:
@@ -138,6 +144,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/deleted":
             body = self._read_json_body()
+            if not _is_admin(self, body):
+                self._send_json(403, {"error": "Нужен пароль редактирования"})
+                return
             name = (body or {}).get("name")
             if not name or not isinstance(name, str):
                 self._send_json(400, {"error": "name required"})
@@ -150,6 +159,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/import":
             body = self._read_json_body()
+            if not _is_admin(self, body):
+                self._send_json(403, {"error": "Нужен пароль редактирования"})
+                return
             url = (body or {}).get("url", "").strip()
             if not url:
                 self._send_json(400, {"error": "url required"})
@@ -167,6 +179,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/import/har":
+            if self.headers.get("X-Admin-Password") != ADMIN_PASSWORD:
+                self._send_json(403, {"error": "Нужен пароль редактирования"})
+                return
             raw = self._read_body()
             ctype = self.headers.get("Content-Type", "")
             har_bytes: bytes | None = None
