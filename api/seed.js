@@ -46,7 +46,15 @@ export default async function handler(req, res) {
     await saveManifest(updated);
 
     const deletedPath = join(root, 'deleted.json');
-    if (existsSync(deletedPath)) {
+    let hasRemoteDeleted = false;
+    try {
+      const { head } = await import('@vercel/blob');
+      await head('gallery/deleted.json');
+      hasRemoteDeleted = true;
+    } catch {
+      hasRemoteDeleted = false;
+    }
+    if (existsSync(deletedPath) && !hasRemoteDeleted) {
       const list = JSON.parse(readFileSync(deletedPath, 'utf-8'));
       await saveDeleted(new Set(list));
     }

@@ -16,6 +16,9 @@ body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0f0f0f;
 .gate-box button{width:100%;padding:10px;border:none;border-radius:8px;background:#5b8def;color:#fff;font-size:1rem;cursor:pointer;font-weight:600}
 .gate-box button:hover{background:#4a7de0}
 .gate-err{color:#f66;font-size:.85rem;min-height:1.2em;margin-top:8px}
+.gate-hint{margin-top:14px;font-size:.8rem}
+.gate-hint button{background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0;font-size:inherit;text-decoration:underline}
+.gate-hint button:hover{color:#aecbfa}
 #app{display:none}
 #app.visible{display:block}
 header{position:sticky;top:0;z-index:10;background:rgba(15,15,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid #222;padding:12px 16px}
@@ -61,6 +64,8 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     <input type="password" id="pwd" placeholder="Пароль" autocomplete="current-password">
     <button type="button" id="pwdBtn">Войти</button>
     <div class="gate-err" id="pwdErr"></div>
+    <p class="gate-hint"><button type="button" id="pwdHint">Узнать текущий пароль</button></p>
+    <p class="gate-hint" id="pwdUntil" style="color:#666;margin-top:8px"></p>
   </div>
 </div>
 <div id="app">
@@ -95,15 +100,20 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
 <div class="toast" id="toast"></div>
 <script>
 (function(){
-  const VIEW_PASS = "kirova9898topa";
-  const ADMIN_PASS = "tinytiny";
   const LS_AUTH = 'ok-gallery-auth';
+  const LS_AUTH_PERIOD = 'ok-gallery-auth-period';
   const LS_ADMIN = 'ok-gallery-admin';
+  const LS_ADMIN_PWD = 'ok-gallery-admin-pwd';
+  const LS_ADMIN_PERIOD = 'ok-gallery-admin-period';
+  const LS_PWD_KEY = 'ok-gallery-pwd-key';
+  const LS_DELETED = 'ok-gallery-deleted-v2';
   const gate = document.getElementById('gate');
   const app = document.getElementById('app');
   const pwd = document.getElementById('pwd');
   const pwdBtn = document.getElementById('pwdBtn');
   const pwdErr = document.getElementById('pwdErr');
+  const pwdHint = document.getElementById('pwdHint');
+  const pwdUntil = document.getElementById('pwdUntil');
   const grid = document.getElementById('grid');
   const status = document.getElementById('status');
   const lb = document.getElementById('lightbox');
@@ -123,6 +133,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   let loaded = 0;
   let currentId = null;
   let toastT, io, syncTimer;
+  let authPeriod = null;
   const useApi = location.protocol.startsWith('http');
 
   function showToast(msg) {
@@ -138,19 +149,37 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   }
 
   function isAdmin() {
-    return sessionStorage.getItem(LS_ADMIN) === '1';
+    return sessionStorage.getItem(LS_ADMIN) === '1' &&
+      sessionStorage.getItem(LS_ADMIN_PERIOD) === String(authPeriod);
   }
 
-  function ensureAdmin() {
+  async function checkAuth(password) {
+    return api('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+  }
+
+  async function ensureAdmin() {
     if (isAdmin()) return true;
     const p = prompt('Пароль для добавления и удаления:');
-    if (p === ADMIN_PASS) {
+    if (p === null) return false;
+    try {
+      const r = await checkAuth(p);
+      if (r.role !== 'admin') {
+        showToast('Нужен пароль редактирования');
+        return false;
+      }
       sessionStorage.setItem(LS_ADMIN, '1');
+      sessionStorage.setItem(LS_ADMIN_PWD, p);
+      sessionStorage.setItem(LS_ADMIN_PERIOD, String(r.period));
       applyAdminUI();
       return true;
+    } catch {
+      showToast('Неверный пароль');
+      return false;
     }
-    if (p !== null) showToast('Неверный пароль');
-    return false;
   }
 
   function applyAdminUI() {
@@ -163,9 +192,53 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   }
 
   function adminHeaders(extra) {
-    return { 'X-Admin-Password': ADMIN_PASS, ...extra };
+    const pwd = sessionStorage.getItem(LS_ADMIN_PWD) || '';
+    return { 'X-Admin-Password': pwd, ...extra };
   }
 
+  async function fetchAuthInfo() {
+    if (!useApi) return;
+    try {
+      const info = await api('/api/auth?_=' + Date.now(), { cache: 'no-store' });
+      authPeriod = info.period;
+      if (pwdUntil && info.validUntil) {
+        const d = new Date(info.validUntil);
+        pwdUntil.textContent = 'Пароль действует до ' + d.toLocaleString('ru-RU') +
+          ' (меняется каждые ' + (info.rotationDays || 2) + ' дн.)';
+      }
+      if (localStorage.getItem(LS_AUTH) === '1' &&
+          localStorage.getItem(LS_AUTH_PERIOD) !== String(authPeriod)) {
+        localStorage.removeItem(LS_AUTH);
+        gate.classList.remove('hidden');
+        app.classList.remove('visible');
+      }
+      if (sessionStorage.getItem(LS_ADMIN_PERIOD) !== String(authPeriod)) {
+        sessionStorage.removeItem(LS_ADMIN);
+        sessionStorage.removeItem(LS_ADMIN_PWD);
+        sessionStorage.removeItem(LS_ADMIN_PERIOD);
+        applyAdminUI();
+      }
+    } catch (_) {}
+  }
+
+  async function showPasswordHint() {
+    let key = localStorage.getItem(LS_PWD_KEY) || '';
+    if (!key) key = prompt('Секретное слово (PASSWORD_SECRET из Vercel):') || '';
+    if (!key) return;
+    try {
+      const r = await api('/api/passwords?key=' + encodeURIComponent(key), { cache: 'no-store' });
+      localStorage.setItem(LS_PWD_KEY, key);
+      const until = new Date(r.validUntil).toLocaleString('ru-RU');
+      alert(
+        'Просмотр: ' + r.view + '\n' +
+        'Редактирование: ' + r.admin + '\n\n' +
+        'Действуют до: ' + until + '\n' +
+        'Меняются каждые ' + r.rotationDays + ' дня.'
+      );
+    } catch (e) {
+      showToast(e.message || 'Неверный ключ');
+    }
+  }
   async function api(path, opts) {
     const r = await fetch(path, opts);
     const j = await r.json().catch(() => ({}));
@@ -181,6 +254,18 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     allPhotos = await api('/api/photos?_=' + Date.now(), { cache: 'no-store' });
   }
 
+  function loadDeletedLocal() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(LS_DELETED) || '[]'));
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveDeletedLocal() {
+    localStorage.setItem(LS_DELETED, JSON.stringify([...deletedSet].sort()));
+  }
+
   async function loadDeleted() {
     if (!useApi) {
       try {
@@ -188,42 +273,81 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
       } catch { deletedSet = new Set(); }
       return;
     }
+    const local = loadDeletedLocal();
     const remote = await api('/api/deleted?_=' + Date.now(), { cache: 'no-store' });
-    // Объединяем: не теряем локальные удаления, пока сервер не подтвердил
-    deletedSet = new Set([...deletedSet, ...(Array.isArray(remote) ? remote : [])]);
+    deletedSet = new Set([
+      ...local,
+      ...(Array.isArray(remote) ? remote : []),
+    ]);
+    saveDeletedLocal();
   }
 
   async function syncAll() {
     try {
       const prevDeleted = new Set(deletedSet);
       await loadDeleted();
-      await loadPhotos();
-      // Не откатываем удаления, если сервер ещё отдал устаревший список
       for (const id of prevDeleted) deletedSet.add(id);
+      saveDeletedLocal();
+      await loadPhotos();
       renderGallery();
     } catch (_) {}
   }
 
   function unlock() {
     localStorage.setItem(LS_AUTH, '1');
+    localStorage.setItem(LS_AUTH_PERIOD, String(authPeriod ?? ''));
     gate.classList.add('hidden');
     app.classList.add('visible');
     startGallery();
   }
 
-  function tryLogin() {
-    if (pwd.value === VIEW_PASS) { pwdErr.textContent = ''; unlock(); }
-    else { pwdErr.textContent = 'Неверный пароль'; pwd.value = ''; pwd.focus(); }
+  async function tryLogin() {
+    if (!useApi) {
+      pwdErr.textContent = 'Откройте через Vercel или serve.py';
+      return;
+    }
+    try {
+      const r = await checkAuth(pwd.value);
+      if (r.role === 'view' || r.role === 'admin') {
+        pwdErr.textContent = '';
+        authPeriod = r.period;
+        if (r.role === 'admin') {
+          sessionStorage.setItem(LS_ADMIN, '1');
+          sessionStorage.setItem(LS_ADMIN_PWD, pwd.value);
+          sessionStorage.setItem(LS_ADMIN_PERIOD, String(r.period));
+        }
+        unlock();
+      } else {
+        pwdErr.textContent = 'Неверный пароль';
+        pwd.value = '';
+        pwd.focus();
+      }
+    } catch {
+      pwdErr.textContent = 'Неверный пароль';
+      pwd.value = '';
+      pwd.focus();
+    }
   }
 
   btnAdmin.onclick = () => { if (ensureAdmin()) showToast('Режим редактирования'); };
+  pwdHint.onclick = showPasswordHint;
 
-  if (localStorage.getItem(LS_AUTH) === '1') unlock();
-  else {
-    pwdBtn.onclick = tryLogin;
-    pwd.onkeydown = e => { if (e.key === 'Enter') tryLogin(); };
-    pwd.focus();
-  }
+  (async function init() {
+    await fetchAuthInfo();
+    if (
+      localStorage.getItem(LS_AUTH) === '1' &&
+      localStorage.getItem(LS_AUTH_PERIOD) === String(authPeriod)
+    ) {
+      gate.classList.add('hidden');
+      app.classList.add('visible');
+      startGallery();
+    } else {
+      pwdBtn.onclick = tryLogin;
+      pwd.onkeydown = e => { if (e.key === 'Enter') tryLogin(); };
+      pwd.focus();
+    }
+    if (useApi) setInterval(fetchAuthInfo, 60000);
+  })();
 
   async function startGallery() {
     applyAdminUI();
@@ -265,6 +389,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
         });
         if (Array.isArray(r.deleted)) deletedSet = new Set([...deletedSet, ...r.deleted]);
         else deletedSet.add(id);
+        saveDeletedLocal();
         allPhotos = allPhotos.filter(p => p.id !== id);
         if (currentId === id) lb.classList.remove('open');
         renderGallery();

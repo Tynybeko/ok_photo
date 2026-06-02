@@ -20,20 +20,20 @@ from gallery_store import (
     list_for_api,
 )
 from ok_import import import_from_har, import_from_profile
+from passwords import get_current_passwords, get_secret, validate_password, is_admin_password
 
 ROOT = Path(__file__).resolve().parent
 DELETED_FILE = ROOT / "deleted.json"
 GALLERY_FILE = ROOT / "gallery.html"
 HOST = "0.0.0.0"
 PORT = 8765
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "tinytiny")
 
 _import_lock = threading.Lock()
 
 
 def _is_admin(handler: BaseHTTPRequestHandler, body: dict | None) -> bool:
     got = handler.headers.get("X-Admin-Password") or (body or {}).get("adminPassword")
-    return got == ADMIN_PASSWORD
+    return is_admin_password(got)
 
 
 def load_deleted() -> set[str]:
@@ -118,6 +118,40 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/auth":
+            cur = get_current_passwords()
+            self._send_json(
+                200,
+                {
+                    "period": cur["period"],
+                    "validUntil": cur["validUntil"],
+                    "rotationDays": cur["rotationDays"],
+                },
+            )
+            return
+
+        if path == "/api/passwords":
+            qs = parse_qs(parsed.query)
+            key = (qs.get("key") or [""])[0]
+            if not key or key != get_secret():
+                self._send_json(
+                    403,
+                    {"error": "Нужен ключ: /api/passwords?key=ВАШ_PASSWORD_SECRET"},
+                )
+                return
+            cur = get_current_passwords()
+            self._send_json(
+                200,
+                {
+                    "view": cur["view"],
+                    "admin": cur["admin"],
+                    "validUntil": cur["validUntil"],
+                    "period": cur["period"],
+                    "rotationDays": cur["rotationDays"],
+                },
+            )
+            return
+
         m = re.match(r"^/media/(.+)$", path)
         if m:
             photo_id = m.group(1)
@@ -142,6 +176,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+
+        if path == "/api/auth":
+            body = self._read_json_body()
+            password = str((body or {}).get("password") or "")
+            role = validate_password(password, "any")
+            if not role:
+                self._send_json(401, {"error": "Неверный пароль"})
+                return
+            cur = get_current_passwords()
+            self._send_json(200, {"ok": True, "role": role, "period": cur["period"]})
+            return
 
         if path == "/api/deleted":
             body = self._read_json_body()
@@ -180,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/upload":
-            if self.headers.get("X-Admin-Password") != ADMIN_PASSWORD:
+            if not is_admin_password(self.headers.get("X-Admin-Password")):
                 self._send_json(403, {"error": "Нужен пароль редактирования"})
                 return
             raw = self._read_body()
@@ -199,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/import/har":
-            if self.headers.get("X-Admin-Password") != ADMIN_PASSWORD:
+            if not is_admin_password(self.headers.get("X-Admin-Password")):
                 self._send_json(403, {"error": "Нужен пароль редактирования"})
                 return
             raw = self._read_body()

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Загрузка локальных data/images → Vercel Blob.
- * Запускается при деплое (npm run build) или вручную: npm run seed
+ * Однократная загрузка data/images → Vercel Blob.
+ * Запуск вручную: SEED_BLOB=1 npm run seed
+ * НЕ запускается при деплое — иначе затирает актуальные данные в Blob.
  */
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -12,7 +13,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imagesDir = join(root, 'data', 'images');
 const manifestPath = join(root, 'data', 'manifest.json');
 
-// .env.local для локального npm run seed
 const envLocal = join(root, '.env.local');
 if (existsSync(envLocal)) {
   for (const line of readFileSync(envLocal, 'utf8').split('\n')) {
@@ -23,10 +23,10 @@ if (existsSync(envLocal)) {
   }
 }
 
-async function blobHasPhotos() {
+async function blobHasManifest() {
   try {
     const meta = await head('gallery/manifest.json');
-    const res = await fetch(meta.url);
+    const res = await fetch(`${meta.url.split('?')[0]}?v=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) return false;
     const data = await res.json();
     return Array.isArray(data) && data.length > 0;
@@ -35,8 +35,22 @@ async function blobHasPhotos() {
   }
 }
 
+async function blobHasDeleted() {
+  try {
+    await head('gallery/deleted.json');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (!process.env.SEED_BLOB) {
+  console.log('[seed] Пропуск (нет SEED_BLOB=1). Деплой не трогает Blob.');
+  process.exit(0);
+}
+
 if (!process.env.BLOB_READ_WRITE_TOKEN) {
-  console.log('[seed] Пропуск: нет BLOB_READ_WRITE_TOKEN (подключите Blob на Vercel)');
+  console.log('[seed] Пропуск: нет BLOB_READ_WRITE_TOKEN');
   process.exit(0);
 }
 
@@ -45,8 +59,8 @@ if (!existsSync(manifestPath)) {
   process.exit(0);
 }
 
-if (await blobHasPhotos()) {
-  console.log('[seed] В Blob уже есть фото — пропуск');
+if (await blobHasManifest()) {
+  console.log('[seed] В Blob уже есть manifest — пропуск (не перезаписываем)');
   process.exit(0);
 }
 
@@ -79,16 +93,22 @@ await put('gallery/manifest.json', JSON.stringify(updated), {
   contentType: 'application/json',
   addRandomSuffix: false,
   allowOverwrite: true,
+  cacheControlMaxAge: 0,
 });
 
+// Не затираем удаления в Blob устаревшим deleted.json из git
 const deletedPath = join(root, 'deleted.json');
-if (existsSync(deletedPath)) {
+if (existsSync(deletedPath) && !(await blobHasDeleted())) {
   await put('gallery/deleted.json', readFileSync(deletedPath, 'utf-8'), {
     access: 'public',
     contentType: 'application/json',
     addRandomSuffix: false,
     allowOverwrite: true,
+    cacheControlMaxAge: 0,
   });
+  console.log('[seed] deleted.json загружен (в Blob его ещё не было)');
+} else if (await blobHasDeleted()) {
+  console.log('[seed] deleted.json в Blob не трогаем');
 }
 
 console.log(`[seed] Готово: ${updated.length} фото в Blob`);

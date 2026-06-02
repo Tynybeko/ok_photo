@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
+  "buildCommand": null,
   "rewrites": [
     { "source": "/gallery.html", "destination": "/index.html" }
   ],
