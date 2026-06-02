@@ -256,19 +256,26 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     if (!confirm('Удалить это фото у всех?')) return;
     try {
       if (useApi) {
-        await api('/api/deleted', {
+        const r = await api('/api/deleted', {
           method: 'POST',
           headers: adminHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ name: id })
         });
-        await syncAll();
+        if (Array.isArray(r.deleted)) deletedSet = new Set(r.deleted);
+        else deletedSet.add(id);
+        allPhotos = allPhotos.filter(p => p.id !== id);
+        if (currentId === id) lb.classList.remove('open');
+        renderGallery();
+        showToast('Удалено');
+        loadDeleted().catch(() => {});
+        loadPhotos().catch(() => {});
       } else {
         deletedSet.add(id);
         localStorage.setItem('ok-gallery-deleted', JSON.stringify([...deletedSet]));
+        if (currentId === id) lb.classList.remove('open');
         renderGallery();
+        showToast('Удалено');
       }
-      if (currentId === id) lb.classList.remove('open');
-      showToast('Удалено');
     } catch (e) {
       showToast('Ошибка: ' + e.message);
     }
