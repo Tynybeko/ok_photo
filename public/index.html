@@ -45,14 +45,33 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
 .card .del{position:absolute;top:6px;right:6px;z-index:5;width:28px;height:28px;border:none;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:16px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
 .card:hover .del,.card .del:focus{opacity:1}
 .card .del:hover{background:#c0392b}
-#lightbox{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.95);align-items:center;justify-content:center;padding:16px;flex-direction:column}
+.card.selectable{cursor:pointer}
+.card.selected{outline:3px solid #5b8def;outline-offset:-3px}
+.card .sel-mark{position:absolute;top:6px;left:6px;z-index:6;width:22px;height:22px;border-radius:4px;border:2px solid #fff;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;font-size:14px;line-height:1}
+.card.selectable .sel-mark{display:flex}
+.card.selected .sel-mark{background:#5b8def;border-color:#5b8def}
+.card.selected .sel-mark::after{content:"✓";color:#fff}
+.select-bar{display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;background:#252525;border-radius:8px;border:1px solid #333}
+.select-bar.active{display:flex}
+.select-bar span{flex:1;font-size:.85rem;color:#aaa;min-width:120px}
+.select-bar button{padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-size:.85rem}
+.select-bar .btn-del-sel{background:#c0392b;color:#fff}
+.select-bar .btn-cancel-sel{background:#444;color:#fff}
+#lightbox{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.95);align-items:center;justify-content:center;padding:16px 56px;flex-direction:column;touch-action:pan-y}
 #lightbox.open{display:flex}
-#lightbox img{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;border-radius:4px}
-#lightbox .toolbar{position:absolute;top:12px;right:12px;display:flex;gap:8px}
+#lightbox .lb-stage{flex:1;display:flex;align-items:center;justify-content:center;width:100%;max-height:calc(100vh - 100px);touch-action:none}
+#lightbox img{max-width:100%;max-height:calc(100vh - 120px);object-fit:contain;border-radius:4px;user-select:none;-webkit-user-drag:none}
+#lightbox .lb-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:102;width:48px;height:48px;border:none;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
+#lightbox .lb-nav:hover{background:rgba(255,255,255,.25)}
+#lightbox .lb-nav:disabled{opacity:.25;cursor:default}
+#lightbox .lb-prev{left:12px}
+#lightbox .lb-next{right:12px}
+#lightbox .toolbar{position:absolute;top:12px;right:12px;display:flex;gap:8px;z-index:103}
 #lightbox .toolbar button{padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:.9rem}
 #lightbox .btn-del{background:#c0392b;color:#fff}
 #lightbox .btn-close{background:#333;color:#fff}
-#lightbox .cap{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:.8rem;color:#aaa;max-width:90%;text-align:center;word-break:break-all}
+#lightbox .cap{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:.8rem;color:#aaa;max-width:90%;text-align:center;word-break:break-all;z-index:103}
+@media (max-width:520px){#lightbox{padding:16px 44px}#lightbox .lb-nav{width:40px;height:40px;font-size:1.6rem}}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;padding:10px 18px;border-radius:8px;font-size:.9rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:300}
 .toast.show{opacity:1}
 </style>
@@ -74,6 +93,12 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
       <h1>Фото OK.ru</h1>
       <span id="status">…</span>
       <button type="button" id="btnAdmin" style="padding:8px 14px;border:none;border-radius:6px;background:#444;color:#fff;font-size:.85rem;cursor:pointer">Редактирование</button>
+      <button type="button" id="btnSelect" style="display:none;padding:8px 14px;border:none;border-radius:6px;background:#444;color:#fff;font-size:.85rem;cursor:pointer">Выбрать</button>
+    </div>
+    <div class="select-bar" id="selectBar">
+      <span id="selectCount">Выбрано: 0</span>
+      <button type="button" class="btn-del-sel" id="btnDeleteSelected">Удалить выбранные</button>
+      <button type="button" class="btn-cancel-sel" id="btnCancelSelect">Отмена</button>
     </div>
     <div class="import-panel">
       <label for="profileUrl">Ссылка на профиль Одноклассников</label>
@@ -94,7 +119,11 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     <button class="btn-del" type="button" id="lbDel">Удалить</button>
     <button class="btn-close" type="button" id="lbClose">&times; Закрыть</button>
   </div>
-  <img alt="">
+  <button type="button" class="lb-nav lb-prev" id="lbPrev" aria-label="Предыдущее">&#8249;</button>
+  <div class="lb-stage" id="lbStage">
+    <img alt="">
+  </div>
+  <button type="button" class="lb-nav lb-next" id="lbNext" aria-label="Следующее">&#8250;</button>
   <div class="cap"></div>
 </div>
 <div class="toast" id="toast"></div>
@@ -117,8 +146,11 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   const grid = document.getElementById('grid');
   const status = document.getElementById('status');
   const lb = document.getElementById('lightbox');
-  const lbImg = lb.querySelector('img');
+  const lbStage = document.getElementById('lbStage');
+  const lbImg = lbStage.querySelector('img');
   const lbCap = lb.querySelector('.cap');
+  const lbPrev = document.getElementById('lbPrev');
+  const lbNext = document.getElementById('lbNext');
   const toast = document.getElementById('toast');
   const profileUrl = document.getElementById('profileUrl');
   const btnImport = document.getElementById('btnImport');
@@ -126,12 +158,21 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   const photoFile = document.getElementById('photoFile');
   const importLog = document.getElementById('importLog');
   const btnAdmin = document.getElementById('btnAdmin');
+  const btnSelect = document.getElementById('btnSelect');
+  const selectBar = document.getElementById('selectBar');
+  const selectCount = document.getElementById('selectCount');
+  const btnDeleteSelected = document.getElementById('btnDeleteSelected');
+  const btnCancelSelect = document.getElementById('btnCancelSelect');
   const importPanel = document.querySelector('.import-panel');
 
   let allPhotos = [];
   let deletedSet = new Set();
+  let selectedSet = new Set();
+  let selectMode = false;
   let loaded = 0;
   let currentId = null;
+  let lbIndex = -1;
+  let touchStartX = 0;
   let toastT, io, syncTimer;
   let authPeriod = null;
   const useApi = location.protocol.startsWith('http');
@@ -182,13 +223,37 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     }
   }
 
+  function visiblePhotos() {
+    return allPhotos.filter(p => !deletedSet.has(p.id));
+  }
+
+  function updateSelectUI() {
+    const n = selectedSet.size;
+    selectCount.textContent = 'Выбрано: ' + n;
+    btnDeleteSelected.disabled = n === 0;
+    grid.querySelectorAll('.card').forEach(card => {
+      card.classList.toggle('selected', selectedSet.has(card.dataset.id));
+    });
+  }
+
+  function setSelectMode(on) {
+    selectMode = on;
+    if (!on) selectedSet.clear();
+    selectBar.classList.toggle('active', on);
+    btnSelect.textContent = on ? 'Выбор ✓' : 'Выбрать';
+    grid.querySelectorAll('.card').forEach(c => c.classList.toggle('selectable', on));
+    updateSelectUI();
+  }
+
   function applyAdminUI() {
     const on = isAdmin();
     if (importPanel) importPanel.style.display = on ? '' : 'none';
+    if (btnSelect) btnSelect.style.display = on ? '' : 'none';
     if (btnAdmin) btnAdmin.textContent = on ? 'Редактирование ✓' : 'Редактирование';
     document.querySelectorAll('.del, #lbDel').forEach(el => {
       el.style.display = on ? '' : 'none';
     });
+    if (!on) setSelectMode(false);
   }
 
   function adminHeaders(extra) {
@@ -330,6 +395,12 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   }
 
   btnAdmin.onclick = () => { if (ensureAdmin()) showToast('Режим редактирования'); };
+  btnSelect.onclick = () => {
+    if (!ensureAdmin()) return;
+    setSelectMode(!selectMode);
+  };
+  btnCancelSelect.onclick = () => setSelectMode(false);
+  btnDeleteSelected.onclick = () => deletePhotos([...selectedSet]);
   pwdHint.onclick = showPasswordHint;
 
   (async function init() {
@@ -357,7 +428,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
   }
 
   function renderGallery() {
-    const items = allPhotos.filter(p => !deletedSet.has(p.id));
+    const items = visiblePhotos();
     loaded = 0;
     grid.innerHTML = '';
     updateStatus();
@@ -367,43 +438,95 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     }
     items.forEach((item, i) => {
       const card = document.createElement('article');
-      card.className = 'card';
+      card.className = 'card' + (selectMode ? ' selectable' : '');
+      if (selectMode && selectedSet.has(item.id)) card.classList.add('selected');
       card.dataset.i = i;
       card.dataset.id = item.id;
-      card.innerHTML = '<div class="ph"></div><button class="del" type="button" title="Удалить">&times;</button>';
-      card.querySelector('.del').onclick = e => { e.stopPropagation(); deletePhoto(item.id); };
+      card.innerHTML = '<div class="ph"></div><div class="sel-mark"></div><button class="del" type="button" title="Удалить">&times;</button>';
+      card.querySelector('.del').onclick = e => { e.stopPropagation(); deletePhotos([item.id]); };
+      card.onclick = e => {
+        if (e.target.closest('.del')) return;
+        if (selectMode) {
+          if (selectedSet.has(item.id)) selectedSet.delete(item.id);
+          else selectedSet.add(item.id);
+          updateSelectUI();
+          return;
+        }
+      };
       grid.appendChild(card);
     });
     observeCards(items);
   }
 
-  async function deletePhoto(id) {
+  async function deletePhotos(ids) {
+    if (!ids.length) return;
     if (!ensureAdmin()) return;
-    if (!confirm('Удалить это фото у всех?')) return;
+    const msg = ids.length === 1
+      ? 'Удалить это фото у всех?'
+      : `Удалить ${ids.length} фото у всех?`;
+    if (!confirm(msg)) return;
     try {
       if (useApi) {
         const r = await api('/api/deleted', {
           method: 'POST',
           headers: adminHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ name: id })
+          body: JSON.stringify(ids.length === 1 ? { name: ids[0] } : { names: ids })
         });
         if (Array.isArray(r.deleted)) deletedSet = new Set([...deletedSet, ...r.deleted]);
-        else deletedSet.add(id);
+        else ids.forEach(id => deletedSet.add(id));
         saveDeletedLocal();
-        allPhotos = allPhotos.filter(p => p.id !== id);
-        if (currentId === id) lb.classList.remove('open');
+        const idSet = new Set(ids);
+        allPhotos = allPhotos.filter(p => !idSet.has(p.id));
+        ids.forEach(id => selectedSet.delete(id));
+        if (currentId && idSet.has(currentId)) closeLightbox();
+        else if (lb.classList.contains('open')) showLightboxAt(lbIndex);
         renderGallery();
-        showToast('Удалено');
+        showToast('Удалено: ' + ids.length);
       } else {
-        deletedSet.add(id);
+        ids.forEach(id => deletedSet.add(id));
         localStorage.setItem('ok-gallery-deleted', JSON.stringify([...deletedSet]));
-        if (currentId === id) lb.classList.remove('open');
+        if (currentId && ids.includes(currentId)) closeLightbox();
         renderGallery();
-        showToast('Удалено');
+        showToast('Удалено: ' + ids.length);
       }
     } catch (e) {
       showToast('Ошибка: ' + e.message);
     }
+  }
+
+  async function deletePhoto(id) {
+    return deletePhotos([id]);
+  }
+
+  function showLightboxAt(index) {
+    const items = visiblePhotos();
+    if (!items.length) { closeLightbox(); return; }
+    lbIndex = Math.max(0, Math.min(index, items.length - 1));
+    const item = items[lbIndex];
+    currentId = item.id;
+    lbImg.src = item.url || ('/media/' + encodeURIComponent(item.id));
+    lbCap.textContent = (lbIndex + 1) + ' / ' + items.length + ' · ' + item.name;
+    lbPrev.disabled = lbIndex <= 0;
+    lbNext.disabled = lbIndex >= items.length - 1;
+    lb.classList.add('open');
+  }
+
+  function openLightbox(id) {
+    const items = visiblePhotos();
+    const idx = items.findIndex(p => p.id === id);
+    if (idx < 0) return;
+    showLightboxAt(idx);
+  }
+
+  function closeLightbox() {
+    lb.classList.remove('open');
+    currentId = null;
+    lbIndex = -1;
+  }
+
+  function goLightbox(delta) {
+    if (!lb.classList.contains('open')) return;
+    showLightboxAt(lbIndex + delta);
   }
 
   function mountImage(card, item) {
@@ -416,7 +539,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     img.src = item.url || ('/media/' + encodeURIComponent(item.id));
     img.onload = () => { img.classList.add('loaded'); card.classList.add('loaded'); loaded++; updateStatus(); };
     card.insertBefore(img, card.querySelector('.ph'));
-    img.onclick = () => { currentId = item.id; lbImg.src = img.src; lbCap.textContent = item.name; lb.classList.add('open'); };
+    img.onclick = () => openLightbox(item.id);
   }
 
   function observeCards(items) {
@@ -446,6 +569,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
         body: JSON.stringify({ url })
       });
       let msg = `Найдено ${r.found}, добавлено ${r.added}, пропущено ${r.skipped}, ошибок ${r.errors || 0}`;
+      if (r.duplicates) msg += ` (дубликатов ${r.duplicates})`;
       if (r.hint) msg += '. ' + r.hint;
       if (r.added === 0) showToast(r.hint || 'Ни одно фото не сохранилось');
       else showToast(`Добавлено ${r.added} фото`);
@@ -466,11 +590,16 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     if (!file) return;
     importLog.textContent = 'Загрузка…';
     try {
-      await api('/api/upload', {
+      const r = await api('/api/upload', {
         method: 'POST',
         body: file,
         headers: adminHeaders({ 'Content-Type': file.type || 'application/octet-stream' })
       });
+      if (r.duplicate) {
+        importLog.textContent = 'Такое фото уже есть';
+        showToast('Дубликат — не сохранено');
+        return;
+      }
       importLog.textContent = 'Фото загружено';
       await syncAll();
       renderGallery();
@@ -494,6 +623,7 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
         headers: adminHeaders({ 'Content-Type': 'application/octet-stream' })
       });
       let msg = `HAR: добавлено ${r.added}, пропущено ${r.skipped}, ошибок ${r.errors || 0}`;
+      if (r.duplicates) msg += ` (дубликатов ${r.duplicates})`;
       if (r.fromBody != null) msg += ` (из файла ${r.fromBody}, скачано ${r.downloaded || 0})`;
       if (r.hint) msg += '. ' + r.hint;
       importLog.textContent = msg;
@@ -508,10 +638,27 @@ h1{margin:0;font-size:1.1rem;font-weight:600}
     }
   };
 
-  document.getElementById('lbClose').onclick = () => lb.classList.remove('open');
+  document.getElementById('lbClose').onclick = closeLightbox;
   document.getElementById('lbDel').onclick = () => { if (currentId) deletePhoto(currentId); };
-  lb.onclick = e => { if (e.target === lb) lb.classList.remove('open'); };
-  document.onkeydown = e => { if (e.key === 'Escape') lb.classList.remove('open'); };
+  lbPrev.onclick = e => { e.stopPropagation(); goLightbox(-1); };
+  lbNext.onclick = e => { e.stopPropagation(); goLightbox(1); };
+  lb.onclick = e => { if (e.target === lb) closeLightbox(); };
+  lbStage.addEventListener('touchstart', e => {
+    touchStartX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  lbStage.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) goLightbox(dx > 0 ? -1 : 1);
+  }, { passive: true });
+  document.onkeydown = e => {
+    if (!lb.classList.contains('open')) {
+      if (e.key === 'Escape' && selectMode) setSelectMode(false);
+      return;
+    }
+    if (e.key === 'Escape') closeLightbox();
+    else if (e.key === 'ArrowLeft') goLightbox(-1);
+    else if (e.key === 'ArrowRight') goLightbox(1);
+  };
 })();
 </script>
 </body>

@@ -1,10 +1,11 @@
 import {
   addPhotoEntries,
-  existingUrlKeys,
+  getDedupeState,
   getManifest,
   uploadImage,
 } from '../../lib/blob-store.js';
 import { nextImportName, parseHar } from '../../lib/ok-import.js';
+import { createBatchDedupe, duplicateReason, registerDedupe } from '../../lib/dedupe.js';
 import { requireAdmin } from '../../lib/auth.js';
 
 export const config = { maxDuration: 300 };
@@ -38,32 +39,36 @@ export default async function handler(req, res) {
 
   try {
     const { items, urlsOnly } = parseHar(buf);
-    const known = await existingUrlKeys();
+    const dedupe = await getDedupeState();
+    const batch = createBatchDedupe();
     let skipped = 0;
+    let duplicates = 0;
     let errors = 0;
     const manifest = await getManifest();
     const newEntries = [];
 
     for (const { url, mime, data } of items) {
-      const key = url.split('&')[0];
-      if (known.has(key)) {
+      const bufData = Buffer.from(data);
+      if (duplicateReason(dedupe, batch, url, bufData)) {
         skipped++;
+        duplicates++;
         continue;
       }
       try {
         const ext =
           { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mime] || '.webp';
         const id = nextImportName([...manifest, ...newEntries], ext);
-        const blob = await uploadImage(id, Buffer.from(data), mime);
+        const blob = await uploadImage(id, bufData, mime);
+        const contentHash = registerDedupe(dedupe, batch, url, bufData);
         newEntries.push({
           id,
           name: id,
           mime,
           source: 'har',
           originalUrl: url,
+          contentHash,
           blobUrl: blob.url,
         });
-        known.add(key);
       } catch {
         errors++;
       }
@@ -71,9 +76,9 @@ export default async function handler(req, res) {
 
     let downloaded = 0;
     for (const url of urlsOnly) {
-      const key = url.split('&')[0];
-      if (known.has(key)) {
+      if (duplicateReason(dedupe, batch, url, null)) {
         skipped++;
+        duplicates++;
         continue;
       }
       try {
@@ -92,20 +97,26 @@ export default async function handler(req, res) {
           errors++;
           continue;
         }
+        if (duplicateReason(dedupe, batch, url, data)) {
+          skipped++;
+          duplicates++;
+          continue;
+        }
         const mime = (r.headers.get('content-type') || 'image/webp').split(';')[0];
         const ext =
           { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mime] || '.webp';
         const id = nextImportName([...manifest, ...newEntries], ext);
         const blob = await uploadImage(id, data, mime);
+        const contentHash = registerDedupe(dedupe, batch, url, data);
         newEntries.push({
           id,
           name: id,
           mime,
           source: 'har',
           originalUrl: url,
+          contentHash,
           blobUrl: blob.url,
         });
-        known.add(key);
         downloaded++;
       } catch {
         errors++;
@@ -119,12 +130,15 @@ export default async function handler(req, res) {
         ? 'В HAR нет фото okcdn.ru. Откройте альбом на ok.ru, прокрутите вниз, сохраните HAR.'
         : added === 0 && items.length === 0 && urlsOnly.length > 0
           ? 'HAR без тел ответов — скачивание по URL не удалось. Экспортируйте HAR с «Save content» или добавьте OK_COOKIES.'
-          : undefined;
+          : added === 0 && duplicates > 0
+            ? `Все ${duplicates} фото уже есть в галерее (дубликаты).`
+            : undefined;
 
     return res.status(200).json({
       ok: true,
       added,
       skipped,
+      duplicates,
       errors,
       fromBody: items.length,
       downloaded,

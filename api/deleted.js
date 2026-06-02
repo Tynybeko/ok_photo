@@ -1,4 +1,4 @@
-import { addDeleted, getDeleted } from '../lib/blob-store.js';
+import { addDeleted, addDeletedMany, getDeleted } from '../lib/blob-store.js';
 import { requireAdmin } from '../lib/auth.js';
 import { readJsonBody } from '../lib/read-body.js';
 
@@ -20,12 +20,16 @@ export default async function handler(req, res) {
     if (!requireAdmin(req, res)) return;
     try {
       const body = await readJsonBody(req);
-      const name = body?.name;
-      if (!name || typeof name !== 'string') {
-        return res.status(400).json({ error: 'name required' });
+      const names = Array.isArray(body?.names)
+        ? body.names.filter((n) => typeof n === 'string' && n)
+        : body?.name
+          ? [body.name]
+          : [];
+      if (!names.length) {
+        return res.status(400).json({ error: 'name or names required' });
       }
-      const deleted = await addDeleted(name);
-      return res.status(200).json({ ok: true, deleted: [...deleted].sort() });
+      const deleted = names.length === 1 ? await addDeleted(names[0]) : await addDeletedMany(names);
+      return res.status(200).json({ ok: true, deleted: [...deleted].sort(), count: names.length });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }

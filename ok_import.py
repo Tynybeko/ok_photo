@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
+from dedupe import (
+    dedupe_state_from_manifest,
+    is_duplicate,
+    register_dedupe,
+    url_dedupe_key,
+)
 from gallery_store import add_photo, load_manifest
 
 ROOT = Path(__file__).resolve().parent
@@ -98,7 +104,7 @@ def extract_photo_urls(html: str) -> list[str]:
         # превью в srcset — берём URL с максимальным dpr
         if not url.startswith("http"):
             url = "https:" + url.lstrip("/")
-        key = url.split("&")[0]
+        key = url_dedupe_key(url)
         if key in seen:
             continue
         seen.add(key)
@@ -142,7 +148,7 @@ def collect_profile_urls(profile_url: str, log: Callable[[str], None] | None = N
     def add_from(page_html: str) -> int:
         n = 0
         for u in extract_photo_urls(page_html):
-            k = u.split("&")[0]
+            k = url_dedupe_key(u)
             if k not in seen:
                 seen.add(k)
                 all_urls.append(u)
@@ -186,13 +192,8 @@ def download_image(url: str) -> tuple[bytes, str]:
     return data, ctype
 
 
-def existing_url_keys() -> set[str]:
-    keys: set[str] = set()
-    for it in load_manifest():
-        u = it.get("url")
-        if u:
-            keys.add(u.split("&")[0])
-    return keys
+def existing_dedupe_state() -> tuple[set[str], set[str]]:
+    return dedupe_state_from_manifest(load_manifest())
 
 
 def import_from_profile(
@@ -200,29 +201,39 @@ def import_from_profile(
     log: Callable[[str], None] | None = None,
 ) -> dict:
     urls = collect_profile_urls(profile_url, log=log)
-    known = existing_url_keys()
+    url_keys, content_hashes = existing_dedupe_state()
+    batch_url_keys: set[str] = set()
+    batch_hashes: set[str] = set()
     added = 0
     skipped = 0
+    duplicates = 0
     errors = 0
 
     for i, url in enumerate(urls, 1):
-        key = url.split("&")[0]
-        if key in known:
+        if is_duplicate(url_keys, content_hashes, batch_url_keys, batch_hashes, url, None):
             skipped += 1
+            duplicates += 1
             continue
         try:
             data, mime = download_image(url)
             if len(data) < 500:
                 errors += 1
                 continue
+            if is_duplicate(url_keys, content_hashes, batch_url_keys, batch_hashes, url, data):
+                skipped += 1
+                duplicates += 1
+                continue
+            ch = register_dedupe(
+                url_keys, content_hashes, batch_url_keys, batch_hashes, url, data
+            )
             add_photo(
                 data,
                 mime,
                 source="ok",
                 profile_url=profile_url,
                 original_url=url,
+                content_hash=ch,
             )
-            known.add(key)
             added += 1
             if log and i % 10 == 0:
                 log(f"Скачано {i}/{len(urls)}…")
@@ -233,6 +244,7 @@ def import_from_profile(
         "found": len(urls),
         "added": added,
         "skipped": skipped,
+        "duplicates": duplicates,
         "errors": errors,
         "has_cookies": COOKIES_FILE.exists(),
     }
@@ -241,14 +253,17 @@ def import_from_profile(
 def import_from_har(har_bytes: bytes) -> dict:
     har = json.loads(har_bytes.decode("utf-8"))
     entries = har.get("log", {}).get("entries", [])
+    url_keys, content_hashes = existing_dedupe_state()
+    batch_url_keys: set[str] = set()
+    batch_hashes: set[str] = set()
     added = 0
     skipped = 0
+    duplicates = 0
     errors = 0
     from_body = 0
     downloaded = 0
-    known = existing_url_keys()
     urls_only: set[str] = set()
-    seen_body: set[str] = set()
+    seen_body_keys: set[str] = set()
 
     for entry in entries:
         url = entry.get("request", {}).get("url", "")
@@ -257,7 +272,7 @@ def import_from_har(har_bytes: bytes) -> dict:
         if any(p in url for p in SKIP_URL_PARTS):
             continue
         url = _best_quality_url(url)
-        key = url.split("&")[0]
+        key = url_dedupe_key(url)
 
         content = entry.get("response", {}).get("content", {})
         text = content.get("text")
@@ -269,33 +284,46 @@ def import_from_har(har_bytes: bytes) -> dict:
                 if content.get("encoding") == "base64"
                 else text.encode("latin1")
             )
-            if len(raw) >= 500 and key not in seen_body:
-                seen_body.add(key)
-                if key in known:
+            if len(raw) >= 500 and key not in seen_body_keys:
+                seen_body_keys.add(key)
+                if is_duplicate(
+                    url_keys, content_hashes, batch_url_keys, batch_hashes, url, raw
+                ):
                     skipped += 1
+                    duplicates += 1
                     continue
-                add_photo(raw, mime, source="har", original_url=url)
-                known.add(key)
+                ch = register_dedupe(
+                    url_keys, content_hashes, batch_url_keys, batch_hashes, url, raw
+                )
+                add_photo(raw, mime, source="har", original_url=url, content_hash=ch)
                 added += 1
                 from_body += 1
                 continue
 
-        urls_only.add(key)
+        urls_only.add(url)
 
-    urls_only -= seen_body
-
-    for key in urls_only:
-        if key in known:
-            skipped += 1
+    for url in urls_only:
+        key = url_dedupe_key(url)
+        if key in seen_body_keys:
             continue
-        url = _best_quality_url(key)
+        url = _best_quality_url(url)
+        if is_duplicate(url_keys, content_hashes, batch_url_keys, batch_hashes, url, None):
+            skipped += 1
+            duplicates += 1
+            continue
         try:
             data, mime = download_image(url)
             if len(data) < 500:
                 errors += 1
                 continue
-            add_photo(data, mime, source="har", original_url=url)
-            known.add(key)
+            if is_duplicate(url_keys, content_hashes, batch_url_keys, batch_hashes, url, data):
+                skipped += 1
+                duplicates += 1
+                continue
+            ch = register_dedupe(
+                url_keys, content_hashes, batch_url_keys, batch_hashes, url, data
+            )
+            add_photo(data, mime, source="har", original_url=url, content_hash=ch)
             added += 1
             downloaded += 1
         except Exception:
@@ -306,10 +334,13 @@ def import_from_har(har_bytes: bytes) -> dict:
         hint = "В HAR нет фото okcdn.ru"
     elif added == 0 and from_body == 0 and urls_only:
         hint = "HAR без тел — скачивание не удалось. Экспортируйте с Save content или cookies.txt"
+    elif added == 0 and duplicates > 0:
+        hint = f"Все {duplicates} фото уже есть в галерее (дубликаты)."
 
     return {
         "added": added,
         "skipped": skipped,
+        "duplicates": duplicates,
         "errors": errors,
         "from_body": from_body,
         "downloaded": downloaded,

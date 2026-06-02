@@ -1,5 +1,6 @@
-import { addPhotoEntries, getManifest, uploadImage } from '../lib/blob-store.js';
+import { addPhotoEntries, getDedupeState, getManifest, uploadImage } from '../lib/blob-store.js';
 import { nextImportName } from '../lib/ok-import.js';
+import { createBatchDedupe, duplicateReason, registerDedupe } from '../lib/dedupe.js';
 import { requireAdmin } from '../lib/auth.js';
 
 export const config = { maxDuration: 60 };
@@ -51,6 +52,12 @@ export default async function handler(req, res) {
   }
 
   try {
+    const dedupe = await getDedupeState();
+    const batch = createBatchDedupe();
+    if (duplicateReason(dedupe, batch, null, buf)) {
+      return res.status(200).json({ ok: true, added: 0, duplicate: true });
+    }
+
     const ext =
       { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[
         mime
@@ -58,12 +65,14 @@ export default async function handler(req, res) {
     const manifest = await getManifest();
     const id = nextImportName(manifest, ext);
     const blob = await uploadImage(id, buf, mime);
+    const contentHash = registerDedupe(dedupe, batch, null, buf);
     const added = await addPhotoEntries([
       {
         id,
         name: id,
         mime,
         source: 'upload',
+        contentHash,
         blobUrl: blob.url,
       },
     ]);

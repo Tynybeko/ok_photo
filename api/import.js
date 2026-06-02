@@ -1,10 +1,11 @@
 import {
   addPhotoEntries,
-  existingUrlKeys,
+  getDedupeState,
   getManifest,
   uploadImage,
 } from '../lib/blob-store.js';
 import { collectProfileUrls, nextImportName } from '../lib/ok-import.js';
+import { createBatchDedupe, duplicateReason, registerDedupe } from '../lib/dedupe.js';
 import { requireAdmin } from '../lib/auth.js';
 
 export const config = { maxDuration: 300 };
@@ -33,8 +34,10 @@ export default async function handler(req, res) {
 
   try {
     const urls = await collectProfileUrls(url, cookies);
-    const known = await existingUrlKeys();
+    const dedupe = await getDedupeState();
+    const batch = createBatchDedupe();
     let skipped = 0;
+    let duplicates = 0;
     let errors = 0;
     const errorSamples = [];
     const manifest = await getManifest();
@@ -43,9 +46,9 @@ export default async function handler(req, res) {
     for (const imageUrl of urls) {
       if (newEntries.length >= maxPhotos) break;
 
-      const key = imageUrl.split('&')[0];
-      if (known.has(key)) {
+      if (duplicateReason(dedupe, batch, imageUrl, null)) {
         skipped++;
+        duplicates++;
         continue;
       }
 
@@ -66,11 +69,18 @@ export default async function handler(req, res) {
           errors++;
           continue;
         }
+        const dup = duplicateReason(dedupe, batch, imageUrl, data);
+        if (dup) {
+          skipped++;
+          duplicates++;
+          continue;
+        }
         const mime = (r.headers.get('content-type') || 'image/jpeg').split(';')[0];
         const ext =
           { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mime] || '.webp';
         const id = nextImportName([...manifest, ...newEntries], ext);
         const blob = await uploadImage(id, data, mime);
+        const contentHash = registerDedupe(dedupe, batch, imageUrl, data);
         newEntries.push({
           id,
           name: id,
@@ -78,9 +88,9 @@ export default async function handler(req, res) {
           source: 'ok',
           profile: url,
           originalUrl: imageUrl,
+          contentHash,
           blobUrl: blob.url,
         });
-        known.add(key);
       } catch (e) {
         errors++;
         if (errorSamples.length < 3) errorSamples.push(e.message || 'fetch error');
@@ -94,13 +104,16 @@ export default async function handler(req, res) {
       found: urls.length,
       added,
       skipped,
+      duplicates,
       errors,
       has_cookies: Boolean(cookies),
       capped: urls.length > maxPhotos,
       hint:
-        added === 0 && urls.length > 0
-          ? 'Фото найдены, но не скачались. Добавьте OK_COOKIES в Vercel или используйте HAR.'
-          : undefined,
+        added === 0 && duplicates > 0
+          ? `Все ${duplicates} фото уже есть в галерее (дубликаты).`
+          : added === 0 && urls.length > 0
+            ? 'Фото найдены, но не скачались. Добавьте OK_COOKIES в Vercel или используйте HAR.'
+            : undefined,
       errorSamples: errorSamples.length ? errorSamples : undefined,
     });
   } catch (e) {

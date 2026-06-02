@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 import shutil
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,7 @@ def add_photo(
     source: str = "ok",
     profile_url: str | None = None,
     original_url: str | None = None,
+    content_hash: str | None = None,
 ) -> dict[str, Any]:
     ext = {
         "image/jpeg": ".jpg",
@@ -117,6 +119,10 @@ def add_photo(
         entry["profile"] = profile_url
     if original_url:
         entry["url"] = original_url
+    if content_hash:
+        entry["contentHash"] = content_hash
+    elif data:
+        entry["contentHash"] = hashlib.sha256(data).hexdigest()[:16]
     items = load_manifest()
     items.insert(0, entry)
     save_manifest(items)

@@ -194,13 +194,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "Нужен пароль редактирования"})
                 return
             name = (body or {}).get("name")
-            if not name or not isinstance(name, str):
-                self._send_json(400, {"error": "name required"})
+            names = body.get("names") if isinstance(body, dict) else None
+            ids = []
+            if isinstance(names, list):
+                ids = [n for n in names if isinstance(n, str) and n]
+            elif name and isinstance(name, str):
+                ids = [name]
+            if not ids:
+                self._send_json(400, {"error": "name or names required"})
                 return
             deleted = load_deleted()
-            deleted.add(name)
+            deleted.update(ids)
             save_deleted(deleted)
-            self._send_json(200, {"ok": True, "deleted": sorted(deleted)})
+            self._send_json(200, {"ok": True, "deleted": sorted(deleted), "count": len(ids)})
             return
 
         if path == "/api/import":

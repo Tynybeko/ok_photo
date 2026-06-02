@@ -4,10 +4,17 @@
   "rewrites": [
     { "source": "/gallery.html", "destination": "/index.html" }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/passwords",
+      "schedule": "0 9 * * *"
+    }
+  ],
   "functions": {
     "api/import.js": { "maxDuration": 300 },
     "api/import/har.js": { "maxDuration": 300 },
     "api/upload.js": { "maxDuration": 60 },
-    "api/seed.js": { "maxDuration": 300 }
+    "api/seed.js": { "maxDuration": 300 },
+    "api/cron/passwords.js": { "maxDuration": 60 }
   }
 }
